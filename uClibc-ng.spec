@@ -1,39 +1,21 @@
 #
 # Conditional build:
 %bcond_without	shared		# don't build shared lib support
-%bcond_with	nptl		# libpthread: NPTL instead of LinuxThreads (experimental; no i386)
 %bcond_without	verbose		# verbose mode
-#
-%ifarch alpha
-%undefine	with_shared
-%endif
 #
 Summary:	C library optimized for size
 Summary(pl.UTF-8):	Biblioteka C zoptymalizowana na rozmiar
-Name:		uClibc
-Version:	0.9.33.2
-Release:	45
-Epoch:		4
+Name:		uClibc-ng
+Version:	1.0.52
+Release:	0.1
 License:	LGPL v2.1
 Group:		Libraries
-Source0:	http://uclibc.org/downloads/%{name}-%{version}.tar.xz
-# Source0-md5:	73e6fe215648d02246f4d195b25fb17e
-Patch0:		%{name}-newsoname.patch
-Patch1:		%{name}-toolchain-wrapper.patch
-Patch2:		%{name}-targetcpu.patch
-Patch3:		%{name}-debug.patch
-Patch4:		%{name}-stdio-unhide.patch
-Patch5:		%{name}-kernel-types.patch
-Patch6:		%{name}-features.patch
-Patch7:		hash-style-detect.patch
-URL:		http://uclibc.org/
+Source0:	https://downloads.uclibc-ng.org/releases/%{version}/%{name}-%{version}.tar.xz
+# Source0-md5:	8a3adfa261b8bd6955ae35a52c9fa777
+URL:		http://uclibc-ng.org/
 BuildRequires:	binutils >= 2.16
 BuildRequires:	cpp
-%if %{with nptl}
 BuildRequires:	gcc >= 5:4.1
-%else
-BuildRequires:	gcc >= 5:3.0
-%endif
 BuildRequires:	linux-libc-headers >= 7:2.6.27
 BuildRequires:	make >= 3.80
 BuildRequires:	ncurses-devel
@@ -42,15 +24,11 @@ BuildRequires:	sed >= 4.0
 BuildRequires:	tar >= 1:1.22
 BuildRequires:	which
 BuildRequires:	xz
-%{?with_nptl:Requires:	uname(version) >= 2.6}
 # only these supported by this .spec; uClibc code supports some more
 ExclusiveArch:	alpha %{ix86} ppc sparc sparcv9 %{x8664}
-%{?with_nptl:ExcludeArch:	i386}
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
-%if "%{cc_version}" >= "4.2"
 %define		specflags	-fgnu89-inline
-%endif
 
 %define		filterout	-fstack-protector -fstack-protector-strong --param=ssp-buffer-size=4
 
@@ -63,12 +41,12 @@ Small libc for building embedded applications.
 Mała libc do budowania aplikacji wbudowanych.
 
 %package devel
-Summary:	Development files for uClibc
-Summary(pl.UTF-8):	Pliki dla programistów uClibc
+Summary:	Development files for uClibc-ng
+Summary(pl.UTF-8):	Pliki dla programistów uClibc-ng
 Group:		Development/Libraries
-Requires:	%{name} = %{epoch}:%{version}-%{release}
+Requires:	%{name} = %{version}-%{release}
 Requires:	linux-libc-headers >= 7:2.6.27
-%requires_eq	gcc
+%requires_eq gcc
 
 %description devel
 Small libc for building embedded applications.
@@ -77,28 +55,20 @@ Small libc for building embedded applications.
 Mała libc do budowania aplikacji wbudowanych.
 
 %package static
-Summary:	Static uClibc libraries
-Summary(pl.UTF-8):	Biblioteki statyczne uClibc
+Summary:	Static uClibc-ng libraries
+Summary(pl.UTF-8):	Biblioteki statyczne uClibc-ng
 Group:		Development/Libraries
-Requires:	%{name}-devel = %{epoch}:%{version}-%{release}
+Requires:	%{name}-devel = %{version}-%{release}
 Provides:	libc-static
 
 %description static
-Static uClibc libraries.
+Static uClibc-ng libraries.
 
 %description static -l pl.UTF-8
-Biblioteki statyczne uClibc.
+Biblioteki statyczne uClibc-ng.
 
 %prep
 %setup -q
-%patch -P0 -p1
-%patch -P1 -p1
-%patch -P2 -p1
-%patch -P3 -p1
-%patch -P4 -p1
-%patch -P5 -p1
-%patch -P6 -p1
-%patch -P7 -p1
 
 # ARCH is already determined by uname -m
 %ifarch %{ix86}
@@ -142,9 +112,10 @@ defconfig=extra/Configs/defconfigs/ia64/defconfig
 %endif
 
 cat <<'EOF' >> $defconfig
+KERNEL_HEADERS="kernel-headers"
 # HAS_NO_THREADS is not set
-%{!?with_nptl:LINUXTHREADS_OLD=y}
-%{?with_nptl:UCLIBC_HAS_THREADS_NATIVE=y}
+# UCLIBC_HAS_LINUXTHREADS is not set
+UCLIBC_HAS_THREADS_NATIVE=y
 UCLIBC_HAS_IPV4=y
 UCLIBC_HAS_IPV6=y
 DO_C99_MATH=y
@@ -180,6 +151,11 @@ install -d our-ld
 ln -s %{_bindir}/ld.bfd our-ld/ld
 PATH=$(pwd)/our-ld:$PATH; export PATH
 
+install -d kernel-headers
+for inc in asm asm-generic linux; do
+	ln -sf %{_includedir}/${inc} kernel-headers/${inc}
+done
+
 # NOTE: 'defconfig' and 'all' must be run in separate make process because of macros
 %{__make} -j1 defconfig \
 	%{?with_verbose:VERBOSE=1} \
@@ -194,7 +170,7 @@ PATH=$(pwd)/our-ld:$PATH; export PATH
 # eventually it gets lost and sets wrong value for TARGET_ARCH and bad value
 # for UCLIBC_LDSO in extra/gcc-uClibc.
 # So we pass it as make arg to be sure it's proper!
-target_arch=$(grep -s '^TARGET_ARCH' .config | sed -e 's/^TARGET_ARCH=//' -e 's/"//g')
+target_arch=$(grep -s '^TARGET_ARCH=' .config | sed -e 's/^TARGET_ARCH=//' -e 's/"//g')
 
 %{__make} -j1 \
 	%{?with_verbose:VERBOSE=1} \
@@ -219,60 +195,9 @@ install -d $RPM_BUILD_ROOT%{_bindir}
 	OPTIMIZATION="%{rpmcflags} -Os" \
 	DESTDIR=$RPM_BUILD_ROOT
 
-%if %{with shared}
-%if %{without nptl}
-mv -f $RPM_BUILD_ROOT%{uclibc_root}/usr/lib/{libpthread-uclibc,libpthread}.so
-ln -sf libpthread-%{version}.so $RPM_BUILD_ROOT%{uclibc_root}/lib/libpthread.so.0
-%endif
-chmod a+rx $RPM_BUILD_ROOT%{uclibc_root}/lib/*.so
-%endif
-
-# these links are *needed* (by stuff in bin/)
-for f in $RPM_BUILD_ROOT%{uclibc_root}/bin/*; do
-	if [ -L $f ]; then
-		l=$(readlink $f)
-		a=${l##*/}
-		d=${l%/*}
-		case "$d" in
-		%{_bindir})
-			ln -sf ${l#%{_bindir}/} $RPM_BUILD_ROOT%{_bindir}/${f##*/}
-			rm -f $f
-			;;
-		$a)
-			mv -f $f $RPM_BUILD_ROOT%{_bindir}
-			;;
-		*)
-			exit 1
-			;;
-		esac
-	else
-		a=${f#*/%{_target_cpu}-uclibc-}
-		ln -sf %{_bindir}/$(basename $f) $RPM_BUILD_ROOT%{uclibc_root}/usr/bin/$a
-		mv -f $f $RPM_BUILD_ROOT%{_bindir}
-	fi
-done
-
-for f in $RPM_BUILD_ROOT%{uclibc_root}/usr/bin/*; do
-	if [ -L $f ]; then
-		l=$(readlink $f)
-		case "${l%/*}" in
-		%{uclibc_root}/bin)
-			a=${l#*/%{_target_cpu}-uclibc-}
-			ln -sf %{_bindir}/$a $f
-			;;
-		%{_bindir})
-			:
-			;;
-		*)
-			exit 2
-			;;
-		esac
-	fi
-done
-
 # rpm -ql linux-libc-headers | awk -F/ ' /^\/usr\/include\// { print "/usr/include/" $4 } ' | sort -u
 for dir in asm asm-generic linux mtd rdma sound video xen; do
-	ln -sf /usr/include/${dir} $RPM_BUILD_ROOT%{uclibc_root}/usr/include/${dir}
+       ln -sf /usr/include/${dir} $RPM_BUILD_ROOT%{uclibc_root}/usr/include/${dir}
 done
 
 %clean
@@ -280,7 +205,7 @@ rm -rf $RPM_BUILD_ROOT
 
 %files
 %defattr(644,root,root,755)
-%doc Changelog* DEDICATION.mjn3 MAINTAINERS README TODO
+%doc MAINTAINERS README
 %dir %{uclibc_root}
 %ifarch %{ix86} %{x8664} ppc sparc sparcv9
 %if %{with shared}
@@ -292,41 +217,8 @@ rm -rf $RPM_BUILD_ROOT
 %files devel
 %defattr(644,root,root,755)
 %doc docs/*.txt
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-addr2line
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-ar
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-as
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-c++
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-cc
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-cpp
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-g++
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-gcc
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-ld
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-nm
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-objcopy
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-objdump
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-ranlib
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-size
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-strings
-%attr(755,root,root) %{_bindir}/%{_target_cpu}-uclibc-strip
 %{uclibc_root}/usr/lib/*.o
 %dir %{uclibc_root}/usr
-%dir %{uclibc_root}/usr/bin
-%attr(755,root,root) %{uclibc_root}/usr/bin/addr2line
-%attr(755,root,root) %{uclibc_root}/usr/bin/ar
-%attr(755,root,root) %{uclibc_root}/usr/bin/as
-%attr(755,root,root) %{uclibc_root}/usr/bin/c++
-%attr(755,root,root) %{uclibc_root}/usr/bin/cc
-%attr(755,root,root) %{uclibc_root}/usr/bin/cpp
-%attr(755,root,root) %{uclibc_root}/usr/bin/g++
-%attr(755,root,root) %{uclibc_root}/usr/bin/gcc
-%attr(755,root,root) %{uclibc_root}/usr/bin/ld
-%attr(755,root,root) %{uclibc_root}/usr/bin/nm
-%attr(755,root,root) %{uclibc_root}/usr/bin/objcopy
-%attr(755,root,root) %{uclibc_root}/usr/bin/objdump
-%attr(755,root,root) %{uclibc_root}/usr/bin/ranlib
-%attr(755,root,root) %{uclibc_root}/usr/bin/size
-%attr(755,root,root) %{uclibc_root}/usr/bin/strings
-%attr(755,root,root) %{uclibc_root}/usr/bin/strip
 %dir %{uclibc_root}/usr/lib
 %if %{with shared}
 %{uclibc_root}/usr/lib/uclibc_nonshared.a
